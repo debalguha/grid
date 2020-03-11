@@ -106,7 +106,7 @@ class ThrallEventConsumer(es: ElasticSearch,
           * From the logs, trying again after 30 seconds should only affect 1/300,000 messages.
           *
            */
-          () => messageProcessor.apply(updateMessage), attempts, attemptTimeout, delay
+          () => messageProcessor.apply(updateMessage), attempts, attemptTimeout, delay, updateMessage.subject
         ).apply().transform {
           case Success(_) => {
             Logger.info(
