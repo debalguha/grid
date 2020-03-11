@@ -88,7 +88,7 @@ class ThrallEventConsumer(es: ElasticSearch,
   }
 
   private def processUpdateMessage(updateMessage: UpdateMessage): Future[UpdateMessage]  = {
-    implicit val mc: MarkerContext = updateMessage.toLogMarker
+    implicit val markerContext: MarkerContext = updateMessage.toLogMarker
     val stopwatch = Stopwatch.start
     //Try to process the update message twice, and give them both 30 seconds to run.
     messageProcessor.chooseProcessor(updateMessage) match {
@@ -100,6 +100,7 @@ class ThrallEventConsumer(es: ElasticSearch,
         Future.failed(new Exception("Could not find processor for ${updateMessage.subject} message"))
       }
       case Some(messageProcessor) => {
+
         RetryHandler.handleWithRetryAndTimeout(
           /*
           * Brief note on retry strategy:
@@ -107,21 +108,32 @@ class ThrallEventConsumer(es: ElasticSearch,
           * From the logs, trying again after 30 seconds should only affect 1/300,000 messages.
           *
            */
-          () => messageProcessor.apply(updateMessage), attempts, attemptTimeout, delay
-        ).apply().transform {
+          (mc) => {
+            implicit val markerContext: MarkerContext = mc
+            messageProcessor.apply(updateMessage)
+          }, attempts, attemptTimeout, delay, markerContext
+        ).transform {
           case Success(_) => {
-            Logger.info(s"Completed processing of ${updateMessage.subject} message")(combineMarkers(updateMessage, stopwatch.elapsed))
+            Logger.info(
+              s"Completed processing of ${
+                updateMessage.subject
+              } message")(combineMarkers(updateMessage, stopwatch.elapsed))
             Success(updateMessage)
           }
           case Failure(timeoutException: TimeoutException) => {
-            Logger.error(s"Timeout of $timeout reached while processing ${updateMessage.subject} message; message will be ignored:", timeoutException)(combineMarkers(updateMessage, stopwatch.elapsed))
+            Logger.error(
+              s"Timeout of $timeout reached while processing ${
+                updateMessage.subject
+              } message; message will be ignored:",
+              timeoutException
+            )(combineMarkers(updateMessage, stopwatch.elapsed))
             Failure(timeoutException)
           }
           case Failure(e: Throwable) => {
             Logger.error(
               s"Failed to process ${
                 updateMessage.subject
-              } message; message will be ignored:", e)(combineMarkers(updateMessage, stopwatch.elapsed))
+              } message; message will be ignored:", e)
             Failure(e)
           }
         }

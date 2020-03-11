@@ -5,13 +5,13 @@ import com.sksamuel.elastic4s.http.JavaClient
 import com.sksamuel.elastic4s.{ElasticClient, ElasticProperties, Response}
 import com.sksamuel.elastic4s.requests.common.HealthStatus
 import com.sksamuel.elastic4s.requests.analysis.{Analysis, AnalysisBuilder}
-
 import com.sksamuel.elastic4s.requests.analyzers.PatternAnalyzerDefinition
 import com.sksamuel.elastic4s.requests.indexes.CreateIndexResponse
 import com.sksamuel.elastic4s.requests.indexes.admin.IndexExistsResponse
+import net.logstash.logback.marker.Markers.appendEntries
+import play.api.{Logger, MarkerContext}
 
-import play.api.Logger
-
+import scala.collection.JavaConverters._
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration._
 import scala.concurrent.{Await, Future}
@@ -64,6 +64,7 @@ trait ElasticSearchClient extends ElasticSearchExecutions {
   }
 
   def healthCheck(): Future[Boolean] = {
+    implicit val markerContext: MarkerContext = MarkerContext(appendEntries(Map("healthcheck" -> true).asJava))
     val request = search(imagesAlias) limit 0
     executeAndLog(request, "Health check").map { _ => true}.recover { case _ => false}
   }

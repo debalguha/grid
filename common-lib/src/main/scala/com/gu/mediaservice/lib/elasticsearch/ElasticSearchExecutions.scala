@@ -1,6 +1,7 @@
 package com.gu.mediaservice.lib.elasticsearch
 
 import com.sksamuel.elastic4s.{ElasticClient, ElasticError, Executor, Functor, Handler, Response}
+import com.gu.mediaservice.lib.logging.MarkerAugmentation
 import net.logstash.logback.marker.LogstashMarker
 import net.logstash.logback.marker.Markers.appendEntries
 import play.api.{Logger, MarkerContext}
@@ -18,7 +19,9 @@ trait ElasticSearchExecutions {
                                                        executor: Executor[Future],
                                                        handler: Handler[T, U],
                                                        manifest: Manifest[U],
-                                                       executionContext: ExecutionContext): Future[Response[U]] = {
+                                                       executionContext: ExecutionContext,
+                                                       markerContext: MarkerContext
+  ): Future[Response[U]] = {
     val start = System.currentTimeMillis()
 
     val result = client.execute(request).transform {
@@ -35,25 +38,38 @@ trait ElasticSearchExecutions {
 
     result.foreach { r =>
       val elapsed = System.currentTimeMillis() - start
-      val markers = MarkerContext(durationMarker(elapsed))
-      Logger.info(s"$message - query returned successfully in $elapsed ms")(markers)
+      val markersWithDuration = MarkerAugmentation.augmentMarkerContext(markerContext,"duration" -> elapsed)
+      Logger.info(s"$message - query returned successfully in $elapsed ms")(markersWithDuration)
     }
 
     result.failed.foreach { e =>
       val elapsed = System.currentTimeMillis() - start
-      val markers = MarkerContext(durationMarker(elapsed))
       e match {
-        case ElasticNotFoundException => Logger.error(s"$message - query failed: Document not Found")(markers)
-        case ElasticException(error) => Logger.error(s"$message - query failed because: ${error.reason} type: ${error.`type`}")(markers)
-        case _ => Logger.error(s"$message - query failed: ${e.getMessage} cs: ${e.getCause}")(markers)
-
+        case ElasticNotFoundException =>
+          Logger.error(s"$message - query failed: Document not Found")(
+            MarkerAugmentation.augmentMarkerContext(
+              markerContext,
+              "duration" -> elapsed,
+              "reason" -> "ElasticNotFoundException"))
+        case ElasticException(error) =>
+          Logger.error(
+            s"$message - query failed because: ${error.reason} type: ${error.`type`}"
+          )(
+            MarkerAugmentation.augmentMarkerContext(markerContext,
+                                                    "duration" -> elapsed,
+                                                    "reason" -> error.reason))
+        case _ =>
+          Logger.error(
+            s"$message - query failed: ${e.getMessage} cs: ${e.getCause}")(
+            MarkerAugmentation.augmentMarkerContext(markerContext,
+                                                    "duration" -> elapsed,
+                                                    "reason" -> e.getCause))
       }
     }
 
     result
   }
 
-  private def durationMarker(elapsed: Long): LogstashMarker = appendEntries(Map("duration" -> elapsed).asJava)
 
 }
 
