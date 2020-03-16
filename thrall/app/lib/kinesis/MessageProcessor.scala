@@ -22,7 +22,8 @@ class MessageProcessor(es: ElasticSearch,
                        bulkIndexS3Client: BulkIndexS3Client
                       ) {
 
-  def process(updateMessage: UpdateMessage)(implicit ec: ExecutionContext, mc: MarkerContext): Future[Any] =
+  def process(updateMessage: UpdateMessage)(implicit ec: ExecutionContext, mc: MarkerContext): Future[Any] = {
+    Logger.info("HELLO THIS IS LOG, IT SHOULD HAVE FULL CONTEXT")
     updateMessage.subject match {
       case "image" => indexImage(updateMessage)
       case "reindex-image" => indexImage(updateMessage)
@@ -44,6 +45,7 @@ class MessageProcessor(es: ElasticSearch,
         Future.failed(ProcessorNotFoundException(unknownSubject))
       }
     }
+  }
 
   def batchIndex(message: UpdateMessage)(implicit ec: ExecutionContext, markerContext: MarkerContext): Future[List[ElasticSearchBulkUpdateResponse]] = {
     val request = message.bulkIndexRequest.get
