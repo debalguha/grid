@@ -14,6 +14,7 @@ import play.api.libs.json._
 
 import scala.concurrent.{ExecutionContext, Future}
 
+
 class MessageProcessor(es: ElasticSearch,
                        store: ThrallStore,
                        metadataEditorNotifications: MetadataEditorNotifications,
@@ -21,32 +22,34 @@ class MessageProcessor(es: ElasticSearch,
                        bulkIndexS3Client: BulkIndexS3Client
                       ) {
 
-  def chooseProcessor(updateMessage: UpdateMessage)(implicit ec: ExecutionContext): Option[UpdateMessage => Future[Any]] = {
-    PartialFunction.condOpt(updateMessage.subject) {
-      case "image" => indexImage
-      case "reindex-image" => indexImage
-      case "delete-image" => deleteImage
-      case "update-image" => indexImage
-      case "delete-image-exports" => deleteImageExports
-      case "update-image-exports" => updateImageExports
-      case "update-image-user-metadata" => updateImageUserMetadata
-      case "update-image-usages" => updateImageUsages
-      case "replace-image-leases" => replaceImageLeases
-      case "add-image-lease" => addImageLease
-      case "remove-image-lease" => removeImageLease
-      case "set-image-collections" => setImageCollections
-      case "delete-usages" => deleteAllUsages
-      case "upsert-rcs-rights" => upsertSyndicationRights
-      case "update-image-photoshoot" => updateImagePhotoshoot
-      case "batch-index" => batchIndex
+  def process(updateMessage: UpdateMessage)(implicit ec: ExecutionContext, mc: MarkerContext): Future[Any] =
+    updateMessage.subject match {
+      case "image" => indexImage(updateMessage)
+      case "reindex-image" => indexImage(updateMessage)
+      case "delete-image" => deleteImage(updateMessage)
+      case "update-image" => indexImage(updateMessage)
+      case "delete-image-exports" => deleteImageExports(updateMessage)
+      case "update-image-exports" => updateImageExports(updateMessage)
+      case "update-image-user-metadata" => updateImageUserMetadata(updateMessage)
+      case "update-image-usages" => updateImageUsages(updateMessage)
+      case "replace-image-leases" => replaceImageLeases(updateMessage)
+      case "add-image-lease" => addImageLease(updateMessage)
+      case "remove-image-lease" => removeImageLease(updateMessage)
+      case "set-image-collections" => setImageCollections(updateMessage)
+      case "delete-usages" => deleteAllUsages(updateMessage)
+      case "upsert-rcs-rights" => upsertSyndicationRights(updateMessage)
+      case "update-image-photoshoot" => updateImagePhotoshoot(updateMessage)
+      case "batch-index" => batchIndex(updateMessage)
+      case unknownSubject => {
+        Future.failed(ProcessorNotFoundException(unknownSubject))
+      }
     }
-  }
 
   def batchIndex(message: UpdateMessage)(implicit ec: ExecutionContext, markerContext: MarkerContext): Future[List[ElasticSearchBulkUpdateResponse]] = {
     val request = message.bulkIndexRequest.get
     Logger.info(s"attempt to parse images from $request")
     val imagesToIndex = bulkIndexS3Client.getImages(request)
-    val newMarker = MarkerAugmentation.augmentMarkerContext(markerContext,("batchImageCount" -> imagesToIndex.length))
+    val newMarker = MarkerAugmentation.augmentMarkerContext(markerContext, ("batchImageCount" -> imagesToIndex.length))
     Logger.info(s"Processing a batch index of size: ${imagesToIndex.size}")(newMarker)
     Future.sequence(es.bulkInsert(imagesToIndex))
   }
@@ -66,7 +69,7 @@ class MessageProcessor(es: ElasticSearch,
     }
   }
 
-  def reindexImage(message: UpdateMessage)(implicit ec: ExecutionContext,  markerContext: MarkerContext) = {
+  def reindexImage(message: UpdateMessage)(implicit ec: ExecutionContext, markerContext: MarkerContext) = {
     Logger.info("Reindexing image")
     indexImage(message)
   }
@@ -76,6 +79,7 @@ class MessageProcessor(es: ElasticSearch,
 
   def updateImageExports(message: UpdateMessage)(implicit ec: ExecutionContext, markerContext: MarkerContext) = {
     def asJsLookup(cs: Seq[Crop]): JsLookupResult = JsDefined(Json.toJson(cs))
+
     withId(message) { id =>
       withCrops(message) { crops =>
         Future.sequence(es.updateImageExports(id, asJsLookup(crops)))
@@ -88,6 +92,7 @@ class MessageProcessor(es: ElasticSearch,
 
   private def updateImageUserMetadata(message: UpdateMessage)(implicit ec: ExecutionContext, markerContext: MarkerContext) = {
     def asJsLookup(e: Edits): JsLookupResult = JsDefined(Json.toJson(e))
+
     withEdits(message) { edits =>
       withLastModified(message) { lastModified =>
         Future.sequence(withId(message)(id => es.applyImageMetadataOverride(id, asJsLookup(edits), dateTimeAsJsLookup(lastModified))))
@@ -97,6 +102,7 @@ class MessageProcessor(es: ElasticSearch,
 
   private def replaceImageLeases(message: UpdateMessage)(implicit ec: ExecutionContext, markerContext: MarkerContext) = {
     def asJsLookup(ls: Seq[MediaLease]): JsLookupResult = JsDefined(Json.toJson(ls))
+
     withId(message) { id =>
       withLeases(message) { leases =>
         Future.sequence(es.replaceImageLeases(id, leases))
@@ -106,6 +112,7 @@ class MessageProcessor(es: ElasticSearch,
 
   private def addImageLease(message: UpdateMessage)(implicit ec: ExecutionContext, markerContext: MarkerContext) = {
     def asJsLookup(m: MediaLease): JsLookupResult = JsDefined(Json.toJson(m))
+
     withId(message) { id =>
       withLease(message) { mediaLease =>
         withLastModified(message) { lastModified =>
@@ -117,6 +124,7 @@ class MessageProcessor(es: ElasticSearch,
 
   def removeImageLease(message: UpdateMessage)(implicit ec: ExecutionContext, markerContext: MarkerContext) = {
     def asJsLookup(i: String): JsLookupResult = JsDefined(Json.toJson(i))
+
     withLeaseId(message) { leaseId =>
       withLastModified(message) { lastModified =>
         Future.sequence(withId(message)(id => es.removeImageLease(id, asJsLookup(leaseId), dateTimeAsJsLookup(lastModified))))
@@ -126,6 +134,7 @@ class MessageProcessor(es: ElasticSearch,
 
   private def setImageCollections(message: UpdateMessage)(implicit ec: ExecutionContext, markerContext: MarkerContext) = {
     def asJsLookup(c: Seq[Collection]): JsLookupResult = JsDefined(Json.toJson(c))
+
     withCollections(message) { collections =>
       withId(message) { id =>
         Future.sequence(es.setImageCollection(id, asJsLookup(collections)))
@@ -266,3 +275,5 @@ class MessageProcessor(es: ElasticSearch,
   private def dateTimeAsJsLookup(d: DateTime): JsLookupResult = JsDefined(Json.toJson(d.toString))
 
 }
+
+case class ProcessorNotFoundException(unknownSubject: String) extends Exception(s"Could not find processor for ${unknownSubject} message")

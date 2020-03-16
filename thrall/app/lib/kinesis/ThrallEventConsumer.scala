@@ -38,7 +38,7 @@ class ThrallEventConsumer(es: ElasticSearch,
 
   private implicit val implicitActorSystem: ActorSystem = actorSystem
 
-  private implicit val ctx: ExecutionContext =
+  private implicit val executionContext: ExecutionContext =
     ExecutionContext.fromExecutor(Executors.newCachedThreadPool)
 
   override def initialize(shardId: String): Unit = {
@@ -91,18 +91,6 @@ class ThrallEventConsumer(es: ElasticSearch,
     implicit val markerContext: MarkerContext = updateMessage.toLogMarker
     val stopwatch = Stopwatch.start
     //Try to process the update message twice, and give them both 30 seconds to run.
-    messageProcessor.chooseProcessor(updateMessage) match {
-      case None => {
-        Logger.error(
-          s"Could not find processor for ${
-            updateMessage.subject
-          } message; message will be ignored")(
-          MarkerAugmentation.augmentMarkerContext(markerContext,stopwatch.elapsed)
-        )
-        Future.failed(new Exception("Could not find processor for ${updateMessage.subject} message"))
-      }
-      case Some(messageProcessor) => {
-
         RetryHandler.handleWithRetryAndTimeout(
           /*
           * Brief note on retry strategy:
@@ -110,9 +98,8 @@ class ThrallEventConsumer(es: ElasticSearch,
           * From the logs, trying again after 30 seconds should only affect 1/300,000 messages.
           *
            */
-          (mc) => {
-            implicit val markerContext: MarkerContext = mc
-            messageProcessor.apply(updateMessage)
+          (markerContext) => {
+            messageProcessor.process(updateMessage)(executionContext,markerContext)
           }, attempts, attemptTimeout, delay, markerContext
         ).transform {
           case Success(_) => {
@@ -121,6 +108,13 @@ class ThrallEventConsumer(es: ElasticSearch,
                 updateMessage.subject
               } message")(MarkerAugmentation.augmentMarkerContext(markerContext, stopwatch.elapsed))
             Success(updateMessage)
+          }
+          case Failure(processorNotFoundException: ProcessorNotFoundException) => {
+            Logger.error(
+              s"Could not find processor for ${
+                processorNotFoundException.unknownSubject
+              } message; message will be ignored")
+            Failure(processorNotFoundException)
           }
           case Failure(timeoutException: TimeoutException) => {
             Logger.error(
@@ -140,9 +134,6 @@ class ThrallEventConsumer(es: ElasticSearch,
           }
         }
       }
-    }
-  }
-
 
   override def shutdown(checkpointer: IRecordProcessorCheckpointer, reason: ShutdownReason): Unit = {
     if (reason == ShutdownReason.TERMINATE) {
