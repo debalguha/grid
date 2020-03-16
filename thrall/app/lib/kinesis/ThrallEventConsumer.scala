@@ -96,7 +96,9 @@ class ThrallEventConsumer(es: ElasticSearch,
         Logger.error(
           s"Could not find processor for ${
             updateMessage.subject
-          } message; message will be ignored")(combineMarkers(updateMessage, stopwatch.elapsed))
+          } message; message will be ignored")(
+          MarkerAugmentation.augmentMarkerContext(markerContext,stopwatch.elapsed)
+        )
         Future.failed(new Exception("Could not find processor for ${updateMessage.subject} message"))
       }
       case Some(messageProcessor) => {
@@ -117,7 +119,7 @@ class ThrallEventConsumer(es: ElasticSearch,
             Logger.info(
               s"Completed processing of ${
                 updateMessage.subject
-              } message")(combineMarkers(updateMessage, stopwatch.elapsed))
+              } message")(MarkerAugmentation.augmentMarkerContext(markerContext, stopwatch.elapsed))
             Success(updateMessage)
           }
           case Failure(timeoutException: TimeoutException) => {
@@ -126,14 +128,14 @@ class ThrallEventConsumer(es: ElasticSearch,
                 updateMessage.subject
               } message; message will be ignored:",
               timeoutException
-            )(combineMarkers(updateMessage, stopwatch.elapsed))
+            )(MarkerAugmentation.augmentMarkerContext(markerContext, stopwatch.elapsed))
             Failure(timeoutException)
           }
           case Failure(e: Throwable) => {
             Logger.error(
               s"Failed to process ${
                 updateMessage.subject
-              } message; message will be ignored:", e)
+              } message; message will be ignored:", e)(MarkerAugmentation.augmentMarkerContext(markerContext, stopwatch.elapsed))
             Failure(e)
           }
         }

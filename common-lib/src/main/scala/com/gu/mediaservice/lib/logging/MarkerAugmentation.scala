@@ -15,11 +15,15 @@ object MarkerAugmentation {
     *         it wouldn't be java if it could be cloned
     */
   def augmentMarkerContext(markerContext: MarkerContext, augmentation: Map[String, Any]): MarkerContext = {
-    val newMarker = appendEntries(augmentation.asJava)
-    markerContext.marker.foreach(newMarker.add)
-    MarkerContext(newMarker)
+    augmentMarkerContext(markerContext, appendEntries(augmentation.asJava))
   }
   def augmentMarkerContext(markerContext: MarkerContext, augmentations: (String, Any)*): MarkerContext = {
-    augmentMarkerContext(markerContext, augmentations.toMap)
+    augmentMarkerContext(markerContext, appendEntries(augmentations.toMap.asJava))
+  }
+  def augmentMarkerContext(markerContext: MarkerContext, augmentations: Marker*): MarkerContext = {
+    val newMarker = appendEntries(Map().asJava)
+    markerContext.marker.foreach(newMarker.add)
+    augmentations.foreach(newMarker.add)
+    MarkerContext(newMarker)
   }
 }
