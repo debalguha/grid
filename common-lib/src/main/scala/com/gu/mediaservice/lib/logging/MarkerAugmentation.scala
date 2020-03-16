@@ -20,10 +20,10 @@ object MarkerAugmentation {
   def augmentMarkerContext(markerContext: MarkerContext, augmentations: (String, Any)*): MarkerContext = {
     augmentMarkerContext(markerContext, appendEntries(augmentations.toMap.asJava))
   }
-  def augmentMarkerContext(markerContext: MarkerContext, augmentations: Marker*): MarkerContext = {
+  def augmentMarkerContext(markerContext: MarkerContext, augmentations: Marker): MarkerContext = {
     val newMarker = appendEntries(Map().asJava)
     markerContext.marker.foreach(newMarker.add)
-    augmentations.foreach(newMarker.add)
+    newMarker.add(augmentations)
     MarkerContext(newMarker)
   }
 }
